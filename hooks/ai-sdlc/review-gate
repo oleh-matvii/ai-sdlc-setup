@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Usage: review-gate status|skip|off|on [path]
+
+status  chain status of the current branch
+skip    let the next push/PR of the current HEAD through without review (one time)
+off/on  disable/enable the review gate globally
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import common  # noqa: E402
+
+if len(sys.argv) < 2 or sys.argv[1] not in ("status", "skip", "off", "on"):
+    print(__doc__.strip())
+    sys.exit(1)
+off_file = os.path.join(common.STATE_DIR, "review-gate-off")
+action = sys.argv[1]
+if action in ("off", "on"):
+    os.makedirs(common.STATE_DIR, exist_ok=True)
+    if action == "off":
+        open(off_file, "w").close()
+    elif os.path.exists(off_file):
+        os.remove(off_file)
+    print("review gate: %s" % ("OFF" if os.path.exists(off_file) else "on"))
+    sys.exit(0)
+
+root = common.git_root(os.path.abspath(sys.argv[2] if len(sys.argv) > 2 else "."))
+if not root:
+    print("not inside a git repo")
+    sys.exit(1)
+branch = common.git(root, "rev-parse", "--abbrev-ref", "HEAD") or "HEAD"
+head = common.git(root, "rev-parse", "HEAD") or ""
+state = common.load_chain(root, branch)
+if action == "skip":
+    state["skip_head"] = head
+    common.save_chain(root, branch, state)
+    print("review gate: next push/PR of %s @ %s goes through without review" % (branch, head[:7]))
+else:
+    print("review gate: %s" % ("OFF" if os.path.exists(off_file) else "on"))
+    if not state.get("head"):
+        print("%s: not reviewed yet" % branch)
+    else:
+        print(state.get("line", ""))
+        if state["head"] != head:
+            print("(stale: reviewed %s, HEAD is now %s)" % (state["head"][:7], head[:7]))
+        if state.get("report"):
+            print("report: %s" % state["report"])

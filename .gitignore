@@ -1,0 +1,8 @@
+evals/**/results/
+evals/routing/evals/
+evals/routing/skills/
+evals/routing/agents
+__pycache__/
+*.pyc
+.DS_Store
+settings.local.json
