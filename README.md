@@ -28,7 +28,8 @@ The route is visible throughout: a banner, decision blocks, stage cards and a fo
 | `hooks/ai-sdlc/` | Hooks: `post_edit.py` (records edits, auto-format), `stop_check.py` (checks before stop), `review_gate.py` (review gate), `secret_guard.py` (asks before touching secrets), `validate_worker_report.py` (worker report structure), `retro_trigger.py` (retro after a PR), shared `common.py`, `learn_log.py`, `hook_decision_log.py`; CLIs `chain-status` and `review-gate`; unit tests `test_*.py` |
 | `scripts/` | `build-routing-evals.py` and `eval-routing.zsh` (routing evals), `review-classes.py` (mistake-log aggregate), `hook-stats.py` (hook decision log summary), with tests |
 | `evals/routing/` | Routing eval cases (`cases.json`) and the eval wrapper plugin manifest |
-| `settings.json` | The hook registrations and plugins this setup needs |
+| `settings.json` | The hook registrations and plugins this setup needs (merged by `install.sh`) |
+| `install.sh`, `tests/` | Installer (symlinks into `~/.claude`, settings merge) and its tests |
 | `examples/` | Sanitized, invented illustrations: a mistake log, a spec-lite, a review-gate report |
 
 ## Prerequisites
@@ -41,18 +42,21 @@ The route is visible throughout: a banner, decision blocks, stage cards and a fo
 
 ## Install
 
-The hooks and scripts reference `$HOME/.claude/...`, so the files must live in `~/.claude`.
+The repo is the source; `~/.claude` gets symlinks to it, so `git pull` updates the setup in place. The hooks and scripts reference `$HOME/.claude/...`, which the links satisfy.
 
-1. Copy or symlink the directories into `~/.claude`:
-   ```sh
-   git clone <this repository URL> ai-sdlc-setup
-   cd ai-sdlc-setup
-   for d in agents skills hooks scripts evals; do mkdir -p ~/.claude/$d && cp -R $d/. ~/.claude/$d/; done
-   cp CLAUDE.md ~/.claude/CLAUDE.md   # or merge into your existing one
-   ```
-   Symlinking (`ln -s "$PWD/skills/ai-sdlc" ~/.claude/skills/ai-sdlc`, etc.) keeps them updatable with `git pull`.
-2. **Merge** `settings.json` into your existing `~/.claude/settings.json` rather than overwriting it: add the `hooks` entries next to yours, and the `enabledPlugins` / `extraKnownMarketplaces` entries you want.
-3. Install the plugins from inside Claude Code (`/plugin`), then start a new session.
+```sh
+git clone <this repository URL> ai-sdlc-setup
+cd ai-sdlc-setup
+./install.sh --dry-run   # show what would change
+./install.sh
+```
+
+`install.sh`:
+- symlinks `CLAUDE.md`, each `agents/*.md`, each `skills/<name>/`, `hooks/ai-sdlc/`, each `scripts/*` file, `evals/routing/cases.json` and `evals/routing/.claude-plugin` into `~/.claude`;
+- moves any existing target that is not already the right symlink to `~/.claude/backups/ai-sdlc-setup-<timestamp>/` first (your own `CLAUDE.md` included — merge it back by hand if you want parts of it); re-running is safe;
+- never overwrites `~/.claude/settings.json`: it adds the repo's hook entries whose command is not there yet and the missing `enabledPlugins` / `extraKnownMarketplaces` keys, keeps everything else (backing up the original), and creates the file when absent. Invalid JSON there stops the install untouched.
+
+Then install the plugins from inside Claude Code (`/plugin`) and start a new session.
 
 Switches (user-only; the hooks deny Claude from flipping them): `hooks/ai-sdlc/review-gate status|skip|off|on`, `AI_SDLC_REVIEW_GATE=0`, `AI_SDLC_STOP_CHECKS=0`.
 
@@ -67,11 +71,12 @@ The evals check that `CLAUDE.md`, the skills and the agents still route tasks co
 
 `eval-routing.zsh` first runs `build-routing-evals.py`, which generates (and `.gitignore` excludes) the per-case `evals/routing/evals/<case>/` prompts with the full `CLAUDE.md` embedded, plus symlinks `evals/routing/skills/` (your enabled global skills and the installed Superpowers skills) and `evals/routing/agents`. Then it runs `claude plugin eval` on `~/.claude/evals/routing`.
 
-Unit tests for the hooks and scripts:
+Unit tests for the hooks, scripts and installer (the installer tests use a temporary `HOME`):
 
 ```sh
 python3 -m unittest discover -s hooks/ai-sdlc -p 'test_*.py'
 python3 -m unittest discover -s scripts -p 'test_*.py'
+python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
 ## Examples
