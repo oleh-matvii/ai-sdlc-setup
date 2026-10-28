@@ -35,6 +35,32 @@ def bash_reason(command, cwd=PROJECT):
     return secret_guard.secret_access_reason(call("Bash", {"command": command}, cwd), HOME)
 
 
+class StateDirWriteTest(unittest.TestCase):
+    """~/.claude/state/ai-sdlc holds the user's switches and checks.json trust: file-tool writes ask."""
+    STATE = HOME + "/.claude/state/ai-sdlc"
+
+    def test_writing_tools_targeting_the_state_dir_ask(self):
+        for tool, path in (("Write", self.STATE + "/trusted-checks.json"), ("Edit", self.STATE + "/chain/x.json"),
+                           ("MultiEdit", "~/.claude/state/ai-sdlc/x"), ("Write", "$HOME/.claude/state/ai-sdlc/x"),
+                           ("Write", self.STATE + "/../ai-sdlc/x")):
+            with self.subTest(tool=tool, path=path):
+                self.assertIsNotNone(file_reason(tool, path))
+        self.assertIsNotNone(file_reason("NotebookEdit", self.STATE + "/x.ipynb", key="notebook_path"))
+        self.assertIsNotNone(file_reason("Write", "state/ai-sdlc/x", cwd=HOME + "/.claude"))
+
+    def test_reading_the_state_dir_does_not_ask(self):
+        for tool in ("Read", "Grep", "Glob"):
+            with self.subTest(tool=tool):
+                self.assertIsNone(file_reason(tool, self.STATE + "/chain/x.json",
+                                              key="file_path" if tool == "Read" else "path"))
+
+    def test_writing_next_to_the_state_dir_does_not_ask(self):
+        for path in (HOME + "/.claude/state/other.json", HOME + "/.claude/state/ai-sdlc-notes/x",
+                     PROJECT + "/.claude/state/ai-sdlc/x"):
+            with self.subTest(path=path):
+                self.assertIsNone(file_reason("Write", path))
+
+
 class SecretFileToolTest(unittest.TestCase):
     def test_read_of_env_file_asks_and_names_it(self):
         reason = file_reason("Read", PROJECT + "/.env")

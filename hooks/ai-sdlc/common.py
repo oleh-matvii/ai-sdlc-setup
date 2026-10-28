@@ -9,6 +9,10 @@ import sys
 STATE_DIR = os.path.expanduser("~/.claude/state/ai-sdlc")
 SESSIONS_DIR = os.path.join(STATE_DIR, "sessions")
 CHAIN_DIR = os.path.join(STATE_DIR, "chain")
+# {"<git root>": "<sha256 of .claude/checks.json>"}: the checks.json contents the user approved with trust-checks.
+# It lives in STATE_DIR, which review_gate.py's user-only guard protects from the agent's writes.
+TRUST_FILE = os.path.join(STATE_DIR, "trusted-checks.json")
+CHECKS_FILE = os.path.join(".claude", "checks.json")
 
 RUBY_EXT = (".rb", ".rake", ".ru", ".gemspec")
 RUBY_NAMES = ("Gemfile", "Rakefile")
@@ -132,6 +136,28 @@ def git(root, *args, timeout=15):
         return p.stdout.strip() if p.returncode == 0 else None
     except Exception:
         return None
+
+
+def load_trust():
+    """The trust store; {} when it is missing or unreadable (nothing is trusted then)."""
+    try:
+        with open(TRUST_FILE) as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, str)} if isinstance(data, dict) else {}
+
+
+def trust_checks(root, sha):
+    store = load_trust()
+    store[root] = sha
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(TRUST_FILE, "w") as f:
+        json.dump(store, f, indent=1, sort_keys=True)
+
+
+def checks_trusted(root, sha):
+    return load_trust().get(root) == sha
 
 
 def chain_paths(root, branch, base_dir=None):

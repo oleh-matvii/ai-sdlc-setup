@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Usage: trust-checks [path]   approve the repo's .claude/checks.json for the ai-sdlc Stop check (user only).
+
+Shows the commands of <git root of path, default .>/.claude/checks.json and records the sha256 of its
+content for that repo root. stop_check.py runs those commands only while the file stays unchanged.
+Run it yourself (in Claude Code: `! ~/.claude/hooks/ai-sdlc/trust-checks`); the review gate denies it to the agent.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import common  # noqa: E402
+import stop_check  # noqa: E402
+
+args = sys.argv[1:]
+if any(a in ("-h", "--help") for a in args):
+    print(__doc__.strip())
+    sys.exit(0)
+if len(args) > 1:
+    print(__doc__.strip(), file=sys.stderr)
+    sys.exit(1)
+
+root = common.git_root(os.path.abspath(args[0] if args else "."))
+if not root:
+    print("trust-checks: not inside a git repo", file=sys.stderr)
+    sys.exit(1)
+path = os.path.join(root, common.CHECKS_FILE)
+try:
+    checks, sha = stop_check.read_checks(root)
+except ValueError as e:
+    print("trust-checks: %s is unusable, nothing trusted: %s" % (path, e), file=sys.stderr)
+    sys.exit(1)
+if checks is None:
+    print("trust-checks: no %s, nothing to trust" % path, file=sys.stderr)
+    sys.exit(1)
+
+print("%s runs these commands from %s with a shell:" % (path, root))
+for name, cmd, timeout in checks:
+    print("  %s (timeout %ss): %s" % (name, timeout, cmd))
+common.trust_checks(root, sha)
+print("trusted (sha256 %s). The Stop check runs them until the file changes." % sha[:12])

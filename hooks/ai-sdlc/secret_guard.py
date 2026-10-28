@@ -4,6 +4,8 @@
 Two protection levels (always "ask", never "deny"; works in auto mode too):
 - secret files (.env*, keys, credentials, ~/.ssh/...): any file tool, and shell printing, asks.
 - read-protected files (~/.claude/settings*.json): only reading, searching and shell printing ask.
+- the ai-sdlc state dir (~/.claude/state/ai-sdlc/: user-only switches, checks.json trust): only
+  file-tool writes (Write, Edit, MultiEdit, NotebookEdit) ask; review_gate.py guards shell writes.
 `.example` / `.sample` / `.template` copies pass. Bash is checked only when it runs a
 content-printing program (cat, grep, jq, ...) on a protected path.
 Asks are logged to the hook decision log (file basename only). Fails open on its own errors.
@@ -24,6 +26,7 @@ SECRET_NAMES = (
 SECRET_DIRS = (".ssh",)
 SAFE_SUFFIXES = (".example", ".sample", ".template")
 READ_PROTECTED = (".claude/settings.json", ".claude/settings.local.json")
+STATE_DIR = ".claude/state/ai-sdlc"
 HOME_SPELLINGS = ("~", "$HOME", "${HOME}")
 PRINTING_PROGRAMS = frozenset((
     "cat", "head", "tail", "less", "more", "bat", "grep", "rg", "sed",
@@ -78,6 +81,12 @@ def secret_kind(path):
     return "secret file (matches %s)" % pattern if pattern else None
 
 
+def write_kind(path, home):
+    if path.lower().startswith(posixpath.join(home, STATE_DIR).lower() + "/"):
+        return "file in the ai-sdlc state dir (user-only switches and checks.json trust)"
+    return secret_kind(path)
+
+
 def read_kind(path, home):
     return "protected settings file" if read_protected(path, home) else secret_kind(path)
 
@@ -93,7 +102,7 @@ def file_tool_match(data, home):
     if not raw:
         return None
     path = resolve(raw, working_dir(data), home)
-    kind = read_kind(path, home) if tool in READING_TOOLS else secret_kind(path)
+    kind = read_kind(path, home) if tool in READING_TOOLS else write_kind(path, home)
     return (path, kind) if kind else None
 
 

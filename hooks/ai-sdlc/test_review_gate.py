@@ -98,6 +98,16 @@ class CheckUserOnlyTest(unittest.TestCase):
                            "cd x && review-gate skip", "(review-gate on)", "bash -c 'review-gate off'",
                            "'/Users/me/.claude/hooks/ai-sdlc/review-gate' skip")
 
+    def test_trusting_a_repos_checks_json_is_user_only(self):
+        self.assert_denied("~/.claude/hooks/ai-sdlc/trust-checks", "trust-checks /path/to/repo",
+                           "cd repo && trust-checks", "bash -c 'trust-checks'",
+                           "python3 ~/.claude/hooks/ai-sdlc/trust-checks .",
+                           "'/Users/me/.claude/hooks/ai-sdlc/trust-checks' /repo")
+
+    def test_mentioning_trust_checks_without_running_it_is_allowed(self):
+        self.assert_allowed("cat ~/.claude/hooks/ai-sdlc/trust-checks", "grep -n trust-checks README.md",
+                            "git log -- hooks/ai-sdlc/trust-checks")
+
     def test_read_only_commands_are_allowed(self):
         self.assert_allowed("~/.claude/hooks/ai-sdlc/review-gate status", "~/.claude/hooks/ai-sdlc/chain-status --md",
                             "git push")
@@ -112,6 +122,18 @@ class CheckUserOnlyTest(unittest.TestCase):
                            "echo x | tee ~/.claude/state/ai-sdlc/x",
                            "mv /tmp/x ~/.claude/state/ai-sdlc/x",
                            "ln -s /tmp/x ~/.claude/state/ai-sdlc/x")
+
+    def test_copies_into_the_state_dir_are_denied(self):
+        self.assert_denied("cp /tmp/x ~/.claude/state/ai-sdlc/trusted-checks.json",
+                           "cp -f /tmp/x ~/.claude/state/ai-sdlc/",
+                           "cp /tmp/x ~/.claude/state/ai-sdlc/x && echo ok",
+                           "cp -t ~/.claude/state/ai-sdlc /tmp/x",
+                           "install -m 600 /tmp/x ~/.claude/state/ai-sdlc/trusted-checks.json",
+                           "install -t ~/.claude/state/ai-sdlc /tmp/x")
+
+    def test_copies_out_of_the_state_dir_are_allowed(self):
+        self.assert_allowed("cp ~/.claude/state/ai-sdlc/chain/x.json /tmp/out",
+                            "cp ~/.claude/state/ai-sdlc/x /tmp/out && cat /tmp/out")
 
     def test_reads_of_the_state_dir_are_allowed(self):
         self.assert_allowed("ls ~/.claude/state/ai-sdlc", "cat ~/.claude/state/ai-sdlc/chain/x.json",

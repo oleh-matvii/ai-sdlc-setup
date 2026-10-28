@@ -25,7 +25,7 @@ The route is visible throughout: a banner, decision blocks, stage cards and a fo
 | `skills/retro/` | Retrospective: mistake-log escalation into REVIEW.md / CLAUDE.md rules or hooks |
 | `skills/repo-setup/` | `/repo-setup`: drafts a project's CLAUDE.md and REVIEW.md |
 | `skills/harnessing-llm-output/` | Rules for app code that calls an LLM (schema, validation retry, prompt version) |
-| `hooks/ai-sdlc/` | Hooks: `post_edit.py` (records edits, auto-format), `stop_check.py` (checks before stop), `review_gate.py` (review gate), `secret_guard.py` (asks before touching secrets), `validate_worker_report.py` (worker report structure), `retro_trigger.py` (retro after a PR), shared `common.py`, `learn_log.py`, `hook_decision_log.py`; CLIs `chain-status` and `review-gate`; unit tests `test_*.py` |
+| `hooks/ai-sdlc/` | Hooks: `post_edit.py` (records edits, auto-format), `stop_check.py` (checks before stop), `review_gate.py` (review gate), `secret_guard.py` (asks before touching secrets), `validate_worker_report.py` (worker report structure), `retro_trigger.py` (retro after a PR), shared `common.py`, `learn_log.py`, `hook_decision_log.py`; CLIs `chain-status`, `review-gate` and `trust-checks`; unit tests `test_*.py` |
 | `scripts/` | `build-routing-evals.py` and `eval-routing.zsh` (routing evals), `review-classes.py` (mistake-log aggregate), `hook-stats.py` (hook decision log summary), with tests |
 | `evals/routing/` | Routing eval cases (`cases.json`) and the eval wrapper plugin manifest |
 | `settings.json` | The hook registrations and plugins this setup needs (merged by `install.sh`) |
@@ -59,6 +59,19 @@ cd ai-sdlc-setup
 Then install the plugins from inside Claude Code (`/plugin`) and start a new session.
 
 Switches (user-only; the hooks deny Claude from flipping them): `hooks/ai-sdlc/review-gate status|skip|off|on`, `AI_SDLC_REVIEW_GATE=0`, `AI_SDLC_STOP_CHECKS=0`.
+
+## Project checks and trust
+
+By default the Stop check runs rubocop/rspec on Ruby files and eslint on JS/TS files. A repo can replace that with its own named commands in `.claude/checks.json`, for example `{"lint": "ruff check .", "test": {"command": "pytest -q", "timeout": 600}}`. Each command runs through a shell from the repo root.
+
+Because a cloned repo could put anything there, its commands run only after you approve that exact file:
+
+```sh
+! ~/.claude/hooks/ai-sdlc/trust-checks            # in Claude Code, from inside the repo
+~/.claude/hooks/ai-sdlc/trust-checks /path/to/repo # or from your own terminal
+```
+
+`trust-checks` prints the commands and records the file's sha256 for the repo root in `~/.claude/state/ai-sdlc/trusted-checks.json`. A new or changed `checks.json` is not run: the Stop check warns, names the file and the command above, and falls back to the built-in checks without blocking. The review gate denies Claude from running `trust-checks` or writing into `~/.claude/state/ai-sdlc/` from the shell (`touch`, `rm`, `mv`, `ln`, `tee`, `sed -i`, redirects, `cp`, `install`), and the secret guard asks before its Write/Edit tools touch that directory. A determined agent can still write the store through an interpreter (for example `python3 -c`), so trust guards against accidents and untrusted repos; it is not a sandbox.
 
 ## Routing evals
 

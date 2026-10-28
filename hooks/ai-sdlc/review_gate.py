@@ -2,7 +2,7 @@
 """PreToolUse (Bash): the ai-sdlc review gate.
 
 1. User-only switches: denies Bash commands that turn off ai-sdlc checks
-   (review-gate, writes to ~/.claude/state/ai-sdlc).
+   (review-gate, writes to ~/.claude/state/ai-sdlc, running trust-checks).
 2. Review gate: before `git push`, `gh pr create` or `gh pr ready`, runs two independent
    headless sessions on base..HEAD (`claude -p --agent code-reviewer` and `--agent acceptance-checker`)
    and lets the command through only when both are green for the current HEAD.
@@ -56,6 +56,14 @@ PUSH_NO_REVIEW_RE = re.compile(r"\s(--delete|-d|--tags)" + CMD_END)
 SEGMENT_END_RE = re.compile(r"[;&|)\n]")
 COMMIT_RE = re.compile(CMD_START + r"git\s+commit" + CMD_END)
 USER_ONLY_RE = re.compile(r"(^|[/\s(;&|\"'`])review-gate[\"']?\s+(off|skip|on)\b")
+# Running trust-checks (approving a repo's checks.json) as a command word: at a segment start, after
+# `-c '` or an interpreter, optionally quoted or path-prefixed. Reading or grepping the file stays allowed.
+TRUST_RUN_RE = re.compile(r"(^|[;&|(`\n]|\$\(|\s-c\s+)\s*[\"']?"
+                          r"(?:(?:env|exec|command|nohup|sudo|python3?|bash|sh|zsh)\s+[\"']?)*"
+                          r"(?:[^\s;&|\"'`]*/)?trust-checks(?=$|[\s;&|)\"'`])")
+# cp/install with the state dir as the destination: a -t target or the last word of the segment.
+STATE_COPY_RE = re.compile(r"\b(cp|install)\s[^\n;&|]*?(-t\s*|--target-directory[=\s]\s*)[\"']?[^\s;&|]*state/ai-sdlc"
+                           r"|\b(cp|install)\s[^\n;&|]*state/ai-sdlc[^\s;&|]*\s*(?=$|[;&|\n])")
 STATE_WRITE_RE = re.compile(r"((\btouch|\brm|\bmv|\bln|\btee|sed\s+-i)\s|>)[^\n;&|]*state/ai-sdlc")
 
 REVIEW_SCHEMA = {
@@ -350,9 +358,9 @@ def gated_command(cmd):
 
 
 def check_user_only(cmd, repo=None):
-    if USER_ONLY_RE.search(cmd) or STATE_WRITE_RE.search(cmd):
+    if any(r.search(cmd) for r in (USER_ONLY_RE, STATE_WRITE_RE, STATE_COPY_RE, TRUST_RUN_RE)):
         decide("deny", "ai-sdlc: this turns off or changes an ai-sdlc safety switch "
-                       "(review gate, stop checks). Only the user does that, from their "
+                       "(review gate, stop checks, checks.json trust). Only the user does that, from their "
                        "own terminal or with `!`. Explain to the user why you think it is needed.",
                "user-only safety switch", repo)
 

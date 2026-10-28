@@ -10,11 +10,15 @@ Runs only when files were edited in this session since the last green check:
       {"lint": "ruff check .", "test": {"command": "pytest -q", "timeout": 600}}
   (a string is a shell command with the default timeout of CHECK_TIMEOUT seconds).
   An unusable checks.json warns and falls back to the built-in checks.
+  Trust: checks.json commands run only when the sha256 of the file is recorded for that repo root
+  by the user's `trust-checks` (common.TRUST_FILE). A new or changed file warns, falls back to the
+  built-in checks and never blocks by itself.
 
 Red -> blocks the stop and feeds the output back to Claude (max 3 times in a row).
 Environment problems (DB/Redis down, timeouts) -> warns the user, does not block.
 Off switch: AI_SDLC_STOP_CHECKS=0 or touch ~/.claude/state/ai-sdlc/stop-checks-off
 """
+import hashlib
 import json
 import os
 import re
@@ -34,7 +38,7 @@ ENV_ERROR_RE = re.compile(
     r"ActiveRecord::NoDatabaseError|PendingMigrationError"
 )
 RSPEC_SUMMARY_RE = re.compile(r"(\d+) examples?, (\d+) failures?")
-CHECKS_FILE = os.path.join(".claude", "checks.json")
+CHECKS_FILE = common.CHECKS_FILE
 CHECK_TIMEOUT = 300
 CHECK_OUTPUT_TAIL = 2000
 
@@ -101,12 +105,21 @@ def load_checks(root):
 
     Raises ValueError naming the problem when the file is unusable.
     """
+    return read_checks(root)[0]
+
+
+def read_checks(root):
+    """(checks, sha256 of the exact bytes they were parsed from); (None, None) without the file.
+
+    Raises ValueError naming the problem when the file is unusable.
+    """
     path = os.path.join(root, CHECKS_FILE)
     if not os.path.isfile(path):
-        return None
+        return None, None
     try:
-        with open(path) as f:
-            data = json.load(f)
+        with open(path, "rb") as f:
+            raw = f.read()
+        data = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError) as e:
         raise ValueError("not readable JSON (%s)" % e)
     if not isinstance(data, dict):
@@ -120,7 +133,12 @@ def load_checks(root):
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
             raise ValueError('"%s" timeout must be a positive number of seconds' % name)
         checks.append((name, cmd, timeout))
-    return checks
+    return checks, hashlib.sha256(raw).hexdigest()
+
+
+def untrusted_warning(root):
+    return ("untrusted %s (new or changed), its commands skipped, built-in checks used; review it, then run "
+            "`! ~/.claude/hooks/ai-sdlc/trust-checks %s`" % (os.path.join(root, CHECKS_FILE), root))
 
 
 def run_shell(cmd, cwd, timeout):
@@ -172,10 +190,14 @@ def main():
         groot = common.git_root(f)
         if groot and groot not in project:
             try:
-                project[groot] = load_checks(groot)
+                checks, sha = read_checks(groot)
             except ValueError as e:
-                project[groot] = None
+                checks, sha = None, None
                 warnings.append("%s in %s is unusable, used the built-in checks: %s" % (CHECKS_FILE, groot, e))
+            if checks is not None and not common.checks_trusted(groot, sha):
+                checks = None
+                warnings.append(untrusted_warning(groot))
+            project[groot] = checks
         if groot and project[groot] is not None:
             continue
         if common.is_ruby(f):

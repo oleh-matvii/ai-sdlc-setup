@@ -1,4 +1,5 @@
 """Unit tests for stop_check.py: python3 -m unittest discover -s ~/.claude/hooks/ai-sdlc -p 'test_*.py'"""
+import hashlib
 import json
 import os
 import subprocess
@@ -91,10 +92,30 @@ class ProjectChecksHookTest(unittest.TestCase):
         open(path, "a").close()
         return path
 
-    def write_checks(self, checks):
+    def write_checks(self, checks, trusted=True):
+        """Writes .claude/checks.json; trusted=True also records its sha256 for this repo, as trust-checks does."""
         os.makedirs(os.path.join(self.repo, ".claude"), exist_ok=True)
         with open(os.path.join(self.repo, ".claude", "checks.json"), "w") as f:
             f.write(checks if isinstance(checks, str) else json.dumps(checks))
+        if trusted:
+            self.trust(self.repo)
+
+    def checks_sha(self):
+        with open(os.path.join(self.repo, ".claude", "checks.json"), "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    def trust_store(self):
+        return os.path.join(self.home, ".claude", "state", "ai-sdlc", "trusted-checks.json")
+
+    def trust(self, root, sha=None):
+        store = {}
+        if os.path.exists(self.trust_store()):
+            with open(self.trust_store()) as f:
+                store = json.load(f)
+        store[root] = sha or self.checks_sha()
+        os.makedirs(os.path.dirname(self.trust_store()), exist_ok=True)
+        with open(self.trust_store(), "w") as f:
+            json.dump(store, f)
 
     def run_hook(self):
         sessions = os.path.join(self.home, ".claude", "state", "ai-sdlc", "sessions")
@@ -196,6 +217,59 @@ class ProjectChecksHookTest(unittest.TestCase):
         self.assertIn("checks.json", out["systemMessage"])
         self.assertTrue(os.path.exists(marker))
 
+
+    # checks.json trust: a repo's commands run only when the user approved this exact file content.
+
+    def test_untrusted_checks_json_commands_do_not_run(self):
+        self.write_checks({"lint": "touch ran.txt"}, trusted=False)
+        self.run_hook()
+        self.assertFalse(os.path.exists(os.path.join(self.repo, "ran.txt")))
+
+    def test_untrusted_checks_json_warns_with_the_file_and_the_trust_command(self):
+        self.write_checks({"lint": "true"}, trusted=False)
+        out = self.run_hook()
+        self.assertIn("⚠", out["systemMessage"])
+        self.assertIn(os.path.join(self.repo, ".claude", "checks.json"), out["systemMessage"])
+        self.assertIn("! ~/.claude/hooks/ai-sdlc/trust-checks", out["systemMessage"])
+
+    def test_an_untrusted_failing_check_does_not_block(self):
+        self.write_checks({"test": "echo 'FAILED test_thing'; exit 1"}, trusted=False)
+        out = self.run_hook()
+        self.assertNotIn("decision", out)
+
+    def test_untrusted_checks_json_falls_back_to_the_built_in_checks(self):
+        marker = self.make_ruby_repo()
+        self.write_checks({"test": "true"}, trusted=False)
+        self.run_hook()
+        self.assertTrue(os.path.exists(marker))
+
+    def test_a_changed_checks_json_is_untrusted_until_trusted_again(self):
+        self.write_checks({"lint": "true"})
+        self.write_checks({"lint": "touch ran.txt"}, trusted=False)
+        out = self.run_hook()
+        self.assertFalse(os.path.exists(os.path.join(self.repo, "ran.txt")))
+        self.assertIn("trust-checks", out["systemMessage"])
+
+    def test_trust_recorded_for_another_repo_does_not_apply(self):
+        self.write_checks({"lint": "touch ran.txt"}, trusted=False)
+        self.trust(os.path.join(self.home, "other-repo"), self.checks_sha())
+        self.run_hook()
+        self.assertFalse(os.path.exists(os.path.join(self.repo, "ran.txt")))
+
+    def test_a_corrupt_trust_store_counts_as_untrusted(self):
+        self.write_checks({"lint": "touch ran.txt"}, trusted=False)
+        os.makedirs(os.path.dirname(self.trust_store()), exist_ok=True)
+        with open(self.trust_store(), "w") as f:
+            f.write("{not json")
+        out = self.run_hook()
+        self.assertFalse(os.path.exists(os.path.join(self.repo, "ran.txt")))
+        self.assertIn("trust-checks", out["systemMessage"])
+
+    def test_trusted_checks_json_runs_chained_shell_commands(self):
+        self.write_checks({"lint": "echo a > ran.txt && echo b >> ran.txt"})
+        self.run_hook()
+        with open(os.path.join(self.repo, "ran.txt")) as f:
+            self.assertEqual(f.read().split(), ["a", "b"])
 
 if __name__ == "__main__":
     unittest.main()
