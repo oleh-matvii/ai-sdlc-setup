@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Usage: chain-status [--md] [path]   ai-sdlc chain status of the current branch (--md: table for a PR body)."""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import common  # noqa: E402
+
+args = [a for a in sys.argv[1:] if a != "--md"]
+root = common.git_root(os.path.abspath(args[0] if args else "."))
+if not root:
+    print("not inside a git repo")
+    sys.exit(1)
+branch = common.git(root, "rev-parse", "--abbrev-ref", "HEAD") or "HEAD"
+head = common.git(root, "rev-parse", "HEAD") or ""
+s = common.load_chain(root, branch)
+if not s.get("head"):
+    print("ai-sdlc: %s has not been through the review gate yet" % branch)
+    sys.exit(0)
+stale = s["head"] != head
+if "--md" not in sys.argv:
+    print(s.get("line", "") + ("  (stale: HEAD moved since the review)" if stale else ""))
+    sys.exit(0)
+
+
+def yes(v):
+    return "✅" if v else "—"
+
+
+rev = s.get("review") or {}
+acc = s.get("acceptance") or {}
+# State saved before the spec layout has `plans` and `plan_alignment` (`no_plan`).
+alignment = acc.get("design_alignment") or {"no_plan": "no_spec"}.get(acc.get("plan_alignment"),
+                                                                       acc.get("plan_alignment"))
+rows = [("Type / size", "%s / %s" % (s.get("type", "?"), s.get("size", "?"))),
+        ("Spec", ", ".join("`%s`" % x for x in s.get("specs") or []) or "—"),
+        ("Tasks", ", ".join("`%s`" % x for x in s.get("task_docs") or s.get("plans") or []) or "—"),
+        ("Tests changed", "%s files" % s.get("tests", 0) if s.get("tests") else "—"),
+        ("code-reviewer", "%s %s" % ("✅" if rev.get("verdict") == "approve" else "❌", rev.get("verdict", "—"))),
+        ("acceptance-checker", "%s %s" % ("✅" if acc.get("status", "").startswith("ready") else
+                                          ("—" if not acc else "❌"), acc.get("status", "skipped (small change)"))),
+        ("Design alignment", {"matches": "✅ matches", "updated": "✅ spec updated", "diverged": "❌ diverged",
+                              "no_spec": "— no spec"}.get(alignment, "—"))]
+print("<details><summary>ai-sdlc chain @ %s%s</summary>\n" % (s["head"][:7], " (stale)" if stale else ""))
+print("| Stage | Result |\n|---|---|")
+for k, v in rows:
+    print("| %s | %s |" % (k, v))
+print("\n</details>")
