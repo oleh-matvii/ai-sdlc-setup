@@ -2,10 +2,7 @@
 
 The task flow is routed by the `ai-sdlc` skill and carried out with the Superpowers plugin (brainstorming → spec → TDD → review → finishing).
 These rules extend it and apply in every repo. A project's CLAUDE.md takes precedence over this file.
-
-## Language
-- Global config (this file, skills, agents, hooks, evals) is written in English.
-- Talk to me in the language I write in. Banner, decision block, stage card and footer labels stay in English as below; their free-text values follow the conversation language.
+lk to me in the language I write in. Banner, decision block, stage card and footer labels stay in English as below; their free-text values follow the conversation language.
 
 ## Routing
 For every new task in the main conversation, invoke the `ai-sdlc` skill (the router: type × size → route) before any other action, and follow the route it gives. Its steps are done by the worker agents it names (code is written by `feature-implementer`, not the main conversation), each through its Superpowers or own skill. Questions, explanations and research without code changes are answered directly, with no routing — except an architecture or design question ("which architecture", "how should we structure", "which pattern"): dispatch the `architect` agent for it, with no banner, no build route and no files.
